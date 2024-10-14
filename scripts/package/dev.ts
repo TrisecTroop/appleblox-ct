@@ -9,7 +9,7 @@ async function main(downloadNeuBinaries = false, createBinaries = false) {
 		await $`bunx neu update`;
 	}
 	if (createBinaries) {
-		await buildSidecar()
+		await buildSidecar();
 	}
 
 	// Clear terminal
@@ -64,7 +64,7 @@ async function main(downloadNeuBinaries = false, createBinaries = false) {
 }
 
 function checkSidecar(): boolean {
-	const files = ['alerter_ablox', 'discordrpc_ablox', 'urlscheme', 'window_manager', 'bootstrap'];
+	const files = ['alerter_ablox', 'discordrpc_ablox', 'urlscheme_ablox', 'window_manager_ablox', 'bootstrap_ablox'];
 	for (const file of files) {
 		const filePath = resolve(join('bin', file));
 		if (!existsSync(filePath)) return false;

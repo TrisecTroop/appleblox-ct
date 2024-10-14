@@ -5,6 +5,7 @@
 	import { Toaster } from '$lib/components/ui/sonner';
 	import { events, os } from '@neutralinojs/lib';
 	import { ModeWatcher, setMode } from 'mode-watcher';
+	import { blur } from 'svelte/transition';
 	import Sidebar from './Sidebar/Sidebar.svelte';
 	import Code from './components/Code.svelte';
 	import Onboarding from './components/Onboarding.svelte';
@@ -102,6 +103,7 @@
 		}
 	});
 
+	// Listen for this dispatch event and change page accordingly.
 	events.on('ui:change_page', (evt: CustomEvent) => {
 		const { id } = evt.detail;
 		currentPage = id || currentPage;
@@ -123,9 +125,9 @@
 	<Toaster richColors />
 	<!-- Content div -->
 	{#if launchInfo.launching}
-		<div class="h-full w-full flex justify-center items-center fixed top-0 left-0 flex-col">
+		<div class="h-full w-full flex justify-center items-center fixed top-0 left-0 flex-col" transition:blur={{ duration: 300 }}>
 			<p class="font-bold text-2xl">{launchInfo.text}</p>
-			<Progress max={100} value={launchInfo.progress} class="w-[60%] bg-primary" />
+			<Progress max={100} bind:value={launchInfo.progress} class="w-[60%]" />
 		</div>
 	{:else}
 		<Sidebar

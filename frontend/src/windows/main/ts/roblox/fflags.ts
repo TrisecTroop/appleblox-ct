@@ -1,12 +1,15 @@
 import { filesystem } from '@neutralinojs/lib';
 import path from 'path-browserify';
 import { toast } from 'svelte-sonner';
-import Roblox from '.';
 import { getAllProfiles, getSelectedProfile, type Profile } from '../../components/flag-editor';
 import { getConfigPath, getValue, loadSettings } from '../../components/settings';
 import type { SelectElement, SettingsOutput } from '../../components/settings/types';
 import { Notification } from '../tools/notifications';
 import shellFS from '../tools/shellfs';
+import { curlGet } from '../utils';
+import { robloxPath } from './path';
+
+const FLAGS_WHITELIST = ['FFlagUserIsBloxstrap', 'FFlagUserAllowsWindowMovement'];
 
 export type FastFlag = string | boolean | null | number;
 export type FFs = { [key: string]: FastFlag };
@@ -22,6 +25,18 @@ async function buildFlagsList(): Promise<FastFlagsList> {
 		forceVulkan: ((await getValue<number[]>('fastflags.graphics.fps_target'))[0] || 60) > 60,
 	};
 	const flags = new FastFlagsList()
+		// Panel: Integrations
+		// SDK
+		// Window Movement
+		.addFlag({
+			name: 'Window Movement',
+			flags: { FFlagUserIsBloxstrap: true, FFlagUserAllowsWindowMovement: true },
+			path: 'integrations.sdk.window',
+			type: 'switch',
+			value: async (s) => (await getValue<boolean>('integrations.sdk.enabled')) === true && (s as boolean) === true,
+		})
+
+		// Panel: FastFlags
 		// GRAPHICS
 		// FPS Target
 		.addFlag({
@@ -452,7 +467,7 @@ export class RobloxFFlags {
 		};
 	}
 	static async writeClientAppSettings() {
-		const filePath = path.join(Roblox.path, 'Contents/MacOS/ClientSettings/ClientAppSettings.json');
+		const filePath = path.join(robloxPath, 'Contents/MacOS/ClientSettings/ClientAppSettings.json');
 		if (await shellFS.exists(filePath)) {
 			await filesystem.remove(filePath);
 		}
@@ -496,13 +511,14 @@ export class FastFlagsList {
 		windows: string[] | null;
 		mac: string[] | null;
 		client: string[] | null;
+		beta: string[] | null;
 	};
 
 	constructor() {
 		this.toParseFlags = [];
 		this.skipPanels = [];
 		this.settings = {};
-		this.trackerCache = { windows: null, mac: null, client: null };
+		this.trackerCache = { windows: null, mac: null, client: null, beta: null };
 	}
 
 	/** Fetch the FastFlags Tracker list */
@@ -548,6 +564,17 @@ export class FastFlagsList {
 				.catch((err) => {
 					console.warn(err);
 					this.trackerCache.client = null;
+				});
+		}
+		if (!this.trackerCache.beta) {
+			await curlGet('https://clientsettings.roblox.com/v2/settings/application/PCDesktopClient/bucket/ZBeta')
+				.then(async (data) => {
+					const flags = Object.keys(data.applicationSettings);
+					this.trackerCache.beta = flags.length > 0 ? flags : null;
+				})
+				.catch((err) => {
+					console.warn(err);
+					this.trackerCache.beta = null;
 				});
 		}
 	}
@@ -676,7 +703,8 @@ export class FastFlagsList {
 			return (
 				this.trackerCache.mac?.includes(flagName) ||
 				this.trackerCache.windows?.includes(flagName) ||
-				this.trackerCache.client?.includes(flagName)
+				this.trackerCache.client?.includes(flagName) ||
+				FLAGS_WHITELIST.includes(flagName)
 			);
 		});
 		let result: FFs = {};

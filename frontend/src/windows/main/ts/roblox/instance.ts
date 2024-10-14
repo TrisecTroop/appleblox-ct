@@ -1,9 +1,16 @@
-import { events, filesystem, os } from '@neutralinojs/lib';
+import { filesystem, os } from '@neutralinojs/lib';
 import path from 'path-browserify';
-import Roblox from '.';
 import { getValue } from '../../components/settings';
-import { shell } from '../tools/shell';
+import { libraryPath } from '../libraries';
+import { Notification } from '../tools/notifications';
+import { shell, spawn, type SpawnEventEmitter } from '../tools/shell';
 import { isProcessAlive, sleep } from '../utils';
+import { RobloxDelegate } from './delegate';
+import { robloxPath } from './path';
+import { RobloxUtils } from './utils';
+
+// Export value to be able to set it from other code
+let restartWatcher = false;
 
 type EventHandler = (data?: any) => void;
 type Event = 'exit' | 'gameInfo' | 'gameEvent';
@@ -94,8 +101,7 @@ export class RobloxInstance {
 	private events: { [key: string]: EventHandler[] } = {};
 	private gameInstance: number | null = null;
 	private latestLogPath: string | null = null;
-	private logsInstance: os.SpawnedProcess | null = null;
-	private lastLogs = '';
+	private logsInstance: SpawnEventEmitter | null = null;
 	private isWatching = false;
 
 	/** Adds a handler to an event */
@@ -129,34 +135,27 @@ export class RobloxInstance {
 
 	/** Initalize class values */
 	public async init() {
-		if (!(await Roblox.Utils.hasRoblox())) return;
+		if (!(await RobloxUtils.hasRoblox())) return;
 	}
 
 	/** Starts the Roblox Instance */
 	public async start(url?: string) {
-		if (this.gameInstance) {
-			if (url) {
-				await this.quit();
-				await sleep(1000); // Precaution delay
-			} else {
-				throw new Error('An instance is already running');
-			}
-		}
+		if (this.gameInstance) throw new Error('An instance is already running');
 
 		console.info('[Roblox.Instance] Opening Roblox instance');
 
 		// Launch Roblox
 		if (url) {
-			await Roblox.Delegate.toggle(false);
+			await RobloxDelegate.toggle(false);
 			await shell('open', [url]);
 		} else {
-			await shell('open', [Roblox.path]);
+			await shell('open', [robloxPath]);
 		}
 
 		await sleep(1000); // Give time for Roblox to open
 		// "If block" because settings can be edited and maybe it will not be boolean
 		if ((await getValue<boolean>('roblox.launching.delegate')) === true) {
-			await Roblox.Delegate.toggle(true);
+			await RobloxDelegate.toggle(true);
 		}
 
 		// We find every roblox processes and get the RobloxPlayer one
@@ -176,7 +175,33 @@ export class RobloxInstance {
 			throw new Error("Couldn't find the RobloxPlayer process. Exiting launch.");
 		}
 
-		// Find the latest log file
+		restartWatcher = true;
+		this.isWatching = true;
+		if (this.watchLogs) {
+			await this.setupLogsWatcher().catch(async (err) => {
+				console.error("[Roblox.Instance] Couldn't start logs watcher:", err);
+				new Notification({
+					title: 'Unable to start Roblox',
+					content: 'AppleBlox was unable to monitor your logs due to an error. Roblox has been closed.',
+				}).show();
+				await this.quit();
+				return;
+			});
+		}
+
+		const intervalId = setInterval(async () => {
+			// Check if instance is still alive
+			if (this.gameInstance && !(await isProcessAlive(this.gameInstance))) {
+				this.emit('exit');
+				await this.cleanup();
+				console.info('[Roblox.Instance] Instance is null, stopping.');
+				clearInterval(intervalId);
+			}
+		}, 500);
+	}
+
+	private async setupLogsWatcher() {
+		// Find the latest log file, if it exceeds 10 tries, abort launch.
 		const logsDirectory = path.join(await os.getEnv('HOME'), 'Library/Logs/Roblox');
 		let tries = 10;
 		while (this.latestLogPath == null) {
@@ -201,82 +226,88 @@ export class RobloxInstance {
 			}
 		}
 
-		// Read the first content, to not miss anything
+		// Read the first content to not miss anything (We use iconv to make sure there is no non-UTF8 chars)
 		await shell(`iconv -f utf-8 -t utf-8 -c "${this.latestLogPath}" > /tmp/roblox_ablox.log`, [], { completeCommand: true });
-		const content = (await shell('cat', ['/tmp/roblox_ablox.log'])).stdOut;
-		// Spawns the logs watcher, and be sure that it kills any previous one
-		await shell(`pkill -f "tail -f /Users/$(whoami)/Library/Logs/Roblox/"`, [], {
-			completeCommand: true,
-			skipStderrCheck: true,
-		});
-		this.logsInstance = await os.spawnProcess(`tail -f "${this.latestLogPath}" | while read line; do echo "Change"; done
-`);
-		console.info(`[Roblox.Instance] Logs watcher started with PID: ${this.logsInstance.pid}`);
+		const content = (await shell('cat', ['/tmp/roblox_ablox.log'])).stdOut.trim();
 
-		let isProcessing = false;
-		const handler = async (evt: CustomEvent) => {
-			// Ensure only one instance of the handler runs at a time
-			if (isProcessing) return;
-			isProcessing = true;
-
+		let lastNotificationTime: null | number = null; // Store the UNIX time at which the last errror notification was created, to prevent spam
+		const stdOutHandler = async (data: string) => {
+			if (!this.isWatching) return;
 			try {
-				// Check if the event comes from the logs watcher, and that it is stdOut
-				if (!this.isWatching || !this.logsInstance || evt.detail.id !== this.logsInstance.id) return;
-
-				if (evt.detail.action === 'exit') {
-					console.warn('[Roblox.Instance] Logs watcher exited with output:', evt.detail.data);
-					console.info('[Roblox.Instance] Restarting logs watcher');
-
-					await shell(`pkill -f "tail -f /Users/$(whoami)/Library/Logs/Roblox/"`, [], {
-						completeCommand: true,
-						skipStderrCheck: true,
-					});
-					this.logsInstance = await os.spawnProcess(
-						`tail -f "${this.latestLogPath}" | while read line; do echo "Change"; done`
-					);
-					return;
+				if (this.watchLogs === false) {
+					console.info('[Roblox.Instance] watchLogs is false. Killing logs watcher.');
+					restartWatcher = false;
+					await shell('kill', ['-9', this.logsInstance?.pid || ''], { skipStderrCheck: true });
 				}
-
-				// Convert the file to ensure proper encoding
-				await shell(`iconv -f utf-8 -t utf-8 -c "${this.latestLogPath}" > /tmp/roblox_ablox.log`, [], {
-					completeCommand: true,
-				});
-
-				// Read the content of the converted file
-				const content = (await shell('cat', ['/tmp/roblox_ablox.log'])).stdOut;
-
-				// Process only new lines
-				const contentLines = content.split('\n');
-				const newContent = contentLines.filter((line) => !this.lastLogs.includes(line));
-
-				if (newContent.length > 0) {
-					await this.processLines(newContent);
-					this.lastLogs = content;
+				const dataLines = data.trim().split('\n');
+				let lines: string[] = [];
+				for (const line of dataLines) {
+					try {
+						lines.push(...JSON.parse(line));
+					} catch {
+						// Invalid JSON so we skip
+					}
 				}
-			} catch (error) {
-				console.error('[Roblox.Instance] Error processing log file:', error);
-			} finally {
-				isProcessing = false;
+				this.processLines(lines);
+			} catch (err) {
+				if (lastNotificationTime == null || Date.now() - lastNotificationTime >= 10_000) {
+					lastNotificationTime = Date.now();
+					new Notification({
+						title: 'An error occured',
+						content: "AppleBlox wasn't able to read Roblox's logs.",
+						sound: true,
+						timeout: 5,
+					}).show();
+					console.error(data);
+					console.error("[Roblox.Instance] Couldn't read Roblox logs:", err);
+				}
 			}
 		};
-		await events.off('spawnedProcess', handler);
-		events.on('spawnedProcess', handler);
-
-		await this.processLines(content.split('\n'));
-		this.lastLogs = content;
-		this.isWatching = true;
-
-		const intervalId = setInterval(async () => {
-			// Check if instance is still alive
-			if (this.gameInstance && !(await isProcessAlive(this.gameInstance))) {
-				this.gameInstance = null;
-				events.off('spawnedProcess', handler);
-				this.emit('exit');
+		const exitHandler = async (code: number) => {
+			if (!restartWatcher) return;
+			console.warn(`[Roblox.Instance] Logs watcher exited with code "${code}". Restarting.`);
+			if (!this.latestLogPath) {
+				console.error('[Roblox.Instance] latestLogPath was undefined. Unable to restart logs watcher. Exiting.');
+				new Notification({
+					title: 'Roblox monitoring stopped',
+					content: 'A problem occured. AppleBlox has stopped monitoring your game.',
+					sound: true,
+					timeout: 8,
+				});
 				await this.cleanup();
-				console.info('[Roblox.Instance] Instance is null, stopping.');
-				clearInterval(intervalId);
+				return;
 			}
-		}, 500);
+			// Rebind watcher
+			await this.startLogsWatcher(this.latestLogPath, stdOutHandler, exitHandler);
+		};
+		// Setup watcher for the first time
+		await this.startLogsWatcher(this.latestLogPath, stdOutHandler, exitHandler);
+		this.processLines(content.split('\n'));
+	}
+
+	private async startLogsWatcher(
+		logsPath: string,
+		stdOutHandler?: (data: string) => void,
+		exitHandler?: (code: number) => void
+	) {
+		// Killing existing watchers
+		console.info('[Roblox.Instance] Starting logs watcher: Killing existing ones...');
+		restartWatcher = false;
+		await shell('pkill', ['-f', 'rlogs_ablox'], { skipStderrCheck: true });
+		await sleep(500);
+
+		// Launching process
+		this.logsInstance = await spawn(libraryPath('rlogs'), [logsPath]);
+		if (stdOutHandler) {
+			this.logsInstance.off('stdOut', stdOutHandler);
+			this.logsInstance.on('stdOut', stdOutHandler);
+		}
+		if (exitHandler) {
+			this.logsInstance.off('exit', exitHandler);
+			this.logsInstance.on('exit', exitHandler);
+		}
+		console.info(`[Roblox.Instance] Restarted logs watcher with PID: ${this.logsInstance.pid}`);
+		restartWatcher = true;
 	}
 
 	private processLines(lines: string[]) {
@@ -300,15 +331,23 @@ export class RobloxInstance {
 
 	public async cleanup() {
 		this.isWatching = false;
+		this.gameInstance = null;
+		this.watchLogs = false;
 		// Kill logs watcher
-		shell(`pkill -f "tail -f /Users/$(whoami)/Library/Logs/Roblox/"`, [], { completeCommand: true, skipStderrCheck: true });
+		restartWatcher = false;
+		await shell('pkill', ['-f', 'rlogs_ablox'], { skipStderrCheck: true });
+		this.logsInstance = null;
 	}
 
 	/** Quits Roblox */
-	public async quit() {
+	public async quit(withoutRoblox = false) {
 		if (this.gameInstance == null) throw new Error("The instance hasn't be started yet");
 		await this.cleanup();
-		console.info('[Roblox.Instance] Quitting Roblox');
-		await shell('kill -9', ['-9', this.gameInstance.toString()]);
+		if (!withoutRoblox) {
+			console.info('[Roblox.Instance] Closing this instance');
+		} else {
+			console.info('[Roblox.Instance] Quitting Roblox');
+			await shell('kill -9', ['-9', this.gameInstance.toString()]);
+		}
 	}
 }

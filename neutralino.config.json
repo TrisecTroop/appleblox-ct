@@ -1,66 +1,72 @@
 {
-	"applicationId": "ch.origaming.appleblox",
-	"version": "0.1.0",
-	"defaultMode": "window",
-	"documentRoot": "/frontend/dist",
-	"url": "/",
-	"enableServer": true,
-	"enableNativeAPI": true,
-	"nativeAllowList": [
-		"events.*", 
-		"os.*", 
-		"filesystem.*", 
-		"window.*", 
-		"clipboard.*", 
-		"computer.*",
-		"app.*"
-	],
-	"exportAuthInfo": false,
-	"logging": {
-		"writeToLogFile": false,
-		"enabled": true
-	},
-	"tokenSecurity": "none",
-	"modes": {
-		"window": {
-			"hidden": true,
-			"title": "AppleBlox",
-			"width": 1150,
-			"height": 700,
-			"minWidth": 400,
-			"minHeight": 200,
-			"icon": "/scripts/build/assets/mac.png",
-			"exitProcessOnClose": false,
-			"useSavedState": false,
-			"extendUserAgentWith": "AppleBlox",
-			"resizable": false,
-			"center": true
-		},
-		"chrome": {
-			"width": 1150,
-			"height": 700
-		}
-	},
-	"cli": {
-		"binaryName": "appleblox",
-		"resourcesPath": "/frontend/dist",
-		"extensionsPath": "/extensions/",
-		"binaryVersion": "5.1.0",
-		"clientVersion": "3.12.0",
-		"frontendLibrary": {
-			"buildCommand": "true",
-			"patchFile": "/frontend/index.html",
-			"devUrl": "http://localhost:5173",
-			"devCommand": "true",
-			"projectPath": "/",
-			"initCommand": "bun install"
-		}
-	},
-	"tray": {
-		"icon": "/resources/icon.png",
-		"menuItems": [
-			{ "id": "closeRoblox", "text": "Close Roblox Instances" },
-			{ "id": "quit", "text": "Quit App" }
-		]
-	}
+  "applicationId": "ch.origaming.appleblox",
+  "version": "0.1.0",
+  "defaultMode": "window",
+  "documentRoot": "/frontend/dist",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "nativeAllowList": [
+    "events.*", 
+    "os.*", 
+    "filesystem.*", 
+    "window.*", 
+    "clipboard.*", 
+    "computer.*",
+    "app.*"
+  ],
+  "exportAuthInfo": false,
+  "logging": {
+    "writeToLogFile": false,
+    "enabled": true
+  },
+  "tokenSecurity": "none",
+  "modes": {
+    "window": {
+      "hidden": true,
+      "title": "AppleBlox",
+      "width": 1150,
+      "height": 700,
+      "minWidth": 400,
+      "minHeight": 200,
+      "icon": "/scripts/build/assets/mac.png",
+      "exitProcessOnClose": false,
+      "useSavedState": false,
+      "extendUserAgentWith": "AppleBlox",
+      "resizable": false,
+      "center": true
+    },
+    "chrome": {
+      "width": 1150,
+      "height": 700
+    }
+  },
+  "cli": {
+    "binaryName": "appleblox",
+    "resourcesPath": "/frontend/dist",
+    "extensionsPath": "/extensions/",
+    "binaryVersion": "5.1.0",
+    "clientVersion": "3.12.0",
+    "frontendLibrary": {
+      "buildCommand": "true",
+      "patchFile": "/frontend/index.html",
+      "devUrl": "http://localhost:5173",
+      "devCommand": "true",
+      "projectPath": "/",
+      "initCommand": "bun install"
+    }
+  },
+  "tray": {
+    "icon": "/resources/icon.png",
+    "menuItems": [
+      {
+        "id": "closeRoblox",
+        "text": "Close Roblox Instances"
+      },
+      {
+        "id": "quit",
+        "text": "Quit App"
+      }
+    ]
+  }
 }
